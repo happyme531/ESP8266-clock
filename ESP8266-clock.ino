@@ -19,7 +19,7 @@
 //#include <BlinkerWidgets.h>
 
 
-   
+
 MD_DS3231 rtc;                              //ds3231 (i2c)
 LiquidCrystal_I2C lcd(0x27, 20, 4);        //lcd2004 (i2c)
 WiFiUDP udp;
@@ -103,16 +103,16 @@ short tend[2];
 void refreshDisplay() {
   uint16_t light = LightSensor.GetLightIntensity();
   float Temp [2] = {rtc.readTempRegister(), sensors.getTempCByIndex(0) - 2.55}; //貌似有误差..?
-  
- 
+
+
   if ( elapsedSec == 60) {       //60秒计算一下趋势
     elapsedSec = 0;
     short* Tend;
     Tend = calculateTend(Temp);
-    memcpy(tend,calculateTend(Temp),sizeof(tend));         //不知道怎么写，反正这个能用
+    memcpy(tend, calculateTend(Temp), sizeof(tend));       //不知道怎么写，反正这个能用
   };
-   Serial.println(tend[0]);
-   elapsedSec++;
+  Serial.println(tend[0]);
+  elapsedSec++;
   //最大程度避免刷新闪屏
   lcd.setCursor(0, 0);
   lcd.print("                    "); //20个空格
@@ -141,11 +141,6 @@ void refreshDisplay() {
         lcd.print(" +");
         break;
       }
-    default: {
-        //lcd.print(String(tend[0])+"   "+String(elapsedSec));
-        break;
-      }
-
   };
 
   lcd.setCursor(0, 3);
@@ -382,59 +377,40 @@ unsigned char LY(unsigned int y)//判断是否为闰年
     }
   };
 */
+#define key4 D5
+#define key3 D6
+#define key2 D7
+#define key1 D8
 
-#define EEPROM_SIZE 1024//EEPROM 大小
-#define SSID_LENGTH_ADDR 1//ssid长度地址
-#define PWD_LENGTH_ADDR 2//password长度地址
-#define DATA_BEGIN_ADDR 10//数据开始地址
-void write_string(int addr, String buf)              //从addr地址开始写入buf
-{
-  char _buf[buf.length() + 1];
-  buf.toCharArray(_buf, buf.length() + 1); //转换成char数组
-  for (int i = 0; i < buf.length(); i++) //写入数据
-  {
-    EEPROM.write(addr + i, *_buf);
-  }
-  EEPROM.commit();
-}
-String read_ssid()                                   //读取ssid数据
-{
-  int ssid_length = EEPROM.read(SSID_LENGTH_ADDR); //读取ssid数据长度
-  String temp = "";
-  for (int i = 0; i < ssid_length; i++)
-  {
-    temp += char(EEPROM.read(DATA_BEGIN_ADDR + i)); //读取数据
-  }
-  return temp;
-}
-String read_pwd()                                    //读取password数据
-{
-  int pwd_length = EEPROM.read(PWD_LENGTH_ADDR); //读取password数据长度
-  int ssid_length = EEPROM.read(SSID_LENGTH_ADDR); //读取ssid数据长度
-  int add = DATA_BEGIN_ADDR + ssid_length; //password数据起始地址
-  String temp = "";
-  for (int i = 0; i < pwd_length; i++)
-  {
-    temp += char(EEPROM.read(add + i)); //读取数据
-  }
-  return temp;
-}
-void save_ssid_pwd(String ssid, String pwd)          //保存ssid password 信息
-{
-  EEPROM.write(SSID_LENGTH_ADDR, ssid.length());//写入长度数据
-  EEPROM.write(PWD_LENGTH_ADDR, pwd.length());//写入长度数据
-  String temp = ssid + pwd;
-  write_string(DATA_BEGIN_ADDR, temp); //保存数据
-}
+unsigned short getKey() {
+  if (digitalRead(key1) == HIGH) {
+    return 1;
+  };
+  if (digitalRead(key2) == HIGH) {
+    return 2;
+  };
+  if (digitalRead(key3) == HIGH) {
+    return 3;
+  };
+  if (digitalRead(key4) == HIGH) {
+    return 4;
+  };
+  return 0;
+
+};
 void setup() {
   Serial.begin(115200);
   lcd.init();                      // 初始化...
   LightSensor.begin();
   Wire.begin();
   sensors.begin();
-  delay(1001);
   lcd.backlight();
-  EEPROM.begin(4096); //直接4kB eeprom,保存esptouch之后的wifi
+  pinMode(key1, INPUT);             //界面切换的四个按键，高电平=按下
+  pinMode(key2, INPUT);
+  pinMode(key3, INPUT);
+  pinMode(key4, INPUT);
+
+  EEPROM.begin(32); //32byte eeprom,保存esptouch之后的wifi
 
   if (EEPROM.read(0) != 1) {      //第一次启动
     lcd.setCursor(0, 0);
