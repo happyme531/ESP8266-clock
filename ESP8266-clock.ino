@@ -4,6 +4,8 @@
 #else
 #define printByte(args)  print(args,BYTE);
 #endif
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
+
 #include <EEPROM.h>
 #include <DallasTemperature.h>
 #include <MD_DS3231.h>
@@ -44,6 +46,23 @@ int message = 1;
 int prevms = 3000;
 bool calibrated = false;
 
+template <class T>
+int getArrayLen(T& array) {
+  return (sizeof(array) / sizeof(array[0]));
+};
+
+void serialPrintlnArray(int array_[],int size_) {
+  Serial.print("{");
+  unsigned int i;
+  for (i = 0; i <size_ ; i++ ) {
+    delay(0);
+    Serial.print(String(array_[i]));
+    delay(0);
+    Serial.print(",");
+  };
+  Serial.println("}");
+};
+
 void updateConfigStatus(sc_status status_, void *pdata) {      //esptouch状态显示
   switch (status_) {
     case SC_STATUS_WAIT:
@@ -68,35 +87,83 @@ void updateConfigStatus(sc_status status_, void *pdata) {      //esptouch状态�
         lcd.print("Receiving data") ;
       }
   };
-
 };
-bool autoBackLight = true;
 
-int historyData [2]; //={30,30};
+bool autoBackLight = true;
+float historyData [2][20]; //={30,30};
 
 short* calculateTend(float Temp[]) {
   short Tend [2];
   uint8_t i = 0;
-  if (historyData[1] != 0) {
-    for (i; i <= 1; i++) {
+  uint8_t j = 0;
+  float historyAverage[2];
 
-      if ((historyData[i] - Temp[i]) <= -0.3) {  //温度上升
-        Tend[i] = 1;
-      };
-      if ((historyData[i] - Temp[i]) >= 0.3) {  //温度下降
-        Tend[i] = -1;
-      };
-      if (abs(historyData[i] - Temp[i]) < 0.3) {  //温度基本不变
-        Tend[i] = 3;
-      };
-      historyData[i] = (historyData[i] * 4 + Temp[i]) / 5;
+  if (historyData[0][0] == 0) {        //没有数据
+    for (i = 0; i <= 1; i++) {
+      for (j = 0; j <= 19; j++) {
+        historyData[i][j] = Temp[i];   //填满这个数组
+      }
     };
-  } else {
-    historyData[1] =  sensors.getTempCByIndex(0) - 2.55;
-    historyData[0] = rtc.readTempRegister();
   };
+
+  for (i = 0; i <= 1; i++) {         //计算平均数
+    float sum=0;
+    for (j = 0; j <= 19; j++) {
+      sum += historyData[i][j];
+    }
+    historyAverage[i] = sum / 20;
+  };
+  Serial.println("average:"+String(historyAverage[0])+" "+String(historyAverage[1]));
+
+
+  for (i = 0; i <= 1; i++) {
+    if ((historyAverage[i] - Temp[i]) <= -0.3) {  //温度上升
+      Tend[i] = 1;
+    };
+    if ((historyAverage[i] - Temp[i]) >= 0.3) {  //温度下降
+      Tend[i] = -1;
+    };
+    if (abs(historyAverage[i] - Temp[i]) < 0.3) {  //温度基本不变
+      Tend[i] = 3;
+    };
+    for (j = 0; j <= 18; j++) {
+      historyData[i][j] = historyData[i][j + 1];
+    };
+    historyData[i][19] = Temp[i];
+  };
+
   return Tend;
 };
+
+void plotGraph(float data_[2][20],int index) {
+  uint8_t i;
+  float data[20];
+  for(i=0;i<=19;i++){
+    data[i]=data_[index][i];
+  };
+  
+  int dataInt10x[20];            //x10再整数化
+  for (i = 0; i <= 19; i++) {
+    dataInt10x[i] = (int)(round(data[i] * 10));
+  };
+
+  int max10x = -2742;
+  int min10x = 2550;
+  for (i = 0; i <= 19; i++) {  //找到最大,最小的元素
+    if (dataInt10x[i] > max10x) {
+      max10x = dataInt10x[i];
+    };
+    if (dataInt10x[i] < min10x) {
+      min10x = dataInt10x[i];
+    };
+  };
+  serialPrintlnArray(dataInt10x,20);
+  Serial.println("arraysize:"+String(ARRAY_SIZE(dataInt10x)));
+  
+
+
+};
+
 
 uint8_t elapsedSec = 55;
 short tend[2];
@@ -104,34 +171,44 @@ void refreshDisplay() {
   uint16_t light = LightSensor.GetLightIntensity();
   float Temp [2] = {rtc.readTempRegister(), sensors.getTempCByIndex(0) - 2.55}; //貌似有误差..?
 
-
   if ( elapsedSec == 60) {       //60秒计算一下趋势
     elapsedSec = 0;
     short* Tend;
-    Tend = calculateTend(Temp);
+    //Tend = calculateTend(Temp);
     memcpy(tend, calculateTend(Temp), sizeof(tend));       //不知道怎么写，反正这个能用
+    
   };
-  Serial.println(tend[0]);
+  if(getKey()==4){
+    plotGraph(historyData,1);
+  };
   elapsedSec++;
   //最大程度避免刷新闪屏
+  String temp_;
+  temp_ = String(rtc.yyyy) + "/" + String(rtc.mm) + "/" + String(rtc.dd);
   lcd.setCursor(0, 0);
   lcd.print("                    "); //20个空格
   lcd.setCursor(0, 0);
-  lcd.print(String(rtc.yyyy) + "/" + String(rtc.mm) + "/" + String(rtc.dd));
+  lcd.print(temp_);
+
+  temp_ = String(rtc.h) + ":" + String(rtc.m) + ":" + String(rtc.s);
   lcd.setCursor(0, 1);
   lcd.print("                    ");
   lcd.setCursor(0, 1);
-  lcd.print(String(rtc.h) + ":" + String(rtc.m) + ":" + String(rtc.s));
-  lcd.setCursor(9, 1);
+  lcd.print(temp_);
+
   if (rtc.pm == 0) {
-    lcd.print("AM");
+    temp_ = "AM";
   } else {
-    lcd.print("PM");
+    temp_ = "PM";
   };
+  lcd.setCursor(9, 1);
+  lcd.print(temp_);
+
+  temp_ = "In:" + String(Temp[0]) + "C";
   lcd.setCursor(0, 2);
   lcd.print("                    ");
   lcd.setCursor(0, 2);
-  lcd.print("In:" + String(Temp[0]) + "C");
+  lcd.print(temp_);
   switch (tend[0]) {
     case -1: {
         lcd.print(" -");
@@ -377,6 +454,7 @@ unsigned char LY(unsigned int y)//判断是否为闰年
     }
   };
 */
+
 #define key4 D5
 #define key3 D6
 #define key2 D7
@@ -409,6 +487,24 @@ void setup() {
   pinMode(key2, INPUT);
   pinMode(key3, INPUT);
   pinMode(key4, INPUT);
+
+  uint8_t L8[8] = {0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f};    //8段竖条，反正内存够~
+  uint8_t L7[8] = {0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f};
+  uint8_t L6[8] = {0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f};
+  uint8_t L5[8] = {0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f};
+  uint8_t L4[8] = {0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f};
+  uint8_t L3[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f};
+  uint8_t L2[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f};
+  uint8_t L1[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f};
+  lcd.createChar(8, L8);
+  lcd.createChar(7, L7);
+  lcd.createChar(6, L6);
+  lcd.createChar(5, L5);
+  lcd.createChar(4, L4);
+  lcd.createChar(3, L3);
+  lcd.createChar(2, L2);
+  lcd.createChar(1, L1);
+
 
   EEPROM.begin(32); //32byte eeprom,保存esptouch之后的wifi
 
