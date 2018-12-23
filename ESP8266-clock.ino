@@ -9,6 +9,8 @@
 #include <EEPROM.h>
 #include <DallasTemperature.h>
 #include <MD_DS3231.h>
+#include <SparkFunHTU21D.h>
+#include <Adafruit_BMP085.h>
 #include <LiquidCrystal_I2C.h>
 #include <Wire.h>
 #include <ESP8266WiFi.h>
@@ -16,6 +18,10 @@
 #include <EasyNTPClient.h>
 #include <WiFiUdp.h>
 #include <BH1750FVI.h>
+
+
+
+
 //#include <Blinker.h>
 
 //#include <BlinkerWidgets.h>
@@ -33,7 +39,11 @@ BH1750FVI::eDeviceMode_t DEVICEMODE = BH1750FVI::k_DevModeContHighRes2;     //BH
 BH1750FVI LightSensor(ADDRESSPIN, DEVICEADDRESS, DEVICEMODE);
 
 OneWire oneWire(D3);
-DallasTemperature sensors(&oneWire);                            //ds18b20 (1wire,D3)
+DallasTemperature ds18b20(&oneWire);                            //ds18b20 (1wire,D3)
+
+HTU21D htu21d;
+
+Adafruit_BMP085 bmp180;
 
 
 
@@ -46,15 +56,11 @@ int message = 1;
 int prevms = 3000;
 bool calibrated = false;
 
-template <class T>
-int getArrayLen(T& array) {
-  return (sizeof(array) / sizeof(array[0]));
-};
 
-void serialPrintlnArray(int array_[],int size_) {
+void serialPrintlnArray(float array_[], int size_) {
   Serial.print("{");
   unsigned int i;
-  for (i = 0; i <size_ ; i++ ) {
+  for (i = 0; i < size_ ; i++ ) {
     delay(0);
     Serial.print(String(array_[i]));
     delay(0);
@@ -107,13 +113,13 @@ short* calculateTend(float Temp[]) {
   };
 
   for (i = 0; i <= 1; i++) {         //计算平均数
-    float sum=0;
+    float sum = 0;
     for (j = 0; j <= 19; j++) {
       sum += historyData[i][j];
     }
     historyAverage[i] = sum / 20;
   };
-  Serial.println("average:"+String(historyAverage[0])+" "+String(historyAverage[1]));
+  Serial.println("average:" + String(historyAverage[0]) + " " + String(historyAverage[1]));
 
 
   for (i = 0; i <= 1; i++) {
@@ -135,51 +141,82 @@ short* calculateTend(float Temp[]) {
   return Tend;
 };
 
-void plotGraph(float data_[2][20],int index) {
+void plotGraph(float data_[2][20], int index) {
   uint8_t i;
   float data[20];
-  for(i=0;i<=19;i++){
-    data[i]=data_[index][i];
-  };
-  
-  int dataInt10x[20];            //x10再整数化
   for (i = 0; i <= 19; i++) {
-    dataInt10x[i] = (int)(round(data[i] * 10));
+    data[i] = data_[index][i];
   };
 
-  int max10x = -2742;
-  int min10x = 2550;
+  float max_ = -100;
+  float min_ = 100;
   for (i = 0; i <= 19; i++) {  //找到最大,最小的元素
-    if (dataInt10x[i] > max10x) {
-      max10x = dataInt10x[i];
+    if (data[i] > max_) {
+      max_ = data[i];
     };
-    if (dataInt10x[i] < min10x) {
-      min10x = dataInt10x[i];
+    if (data[i] < min_) {
+      min_ = data[i];
     };
   };
-  serialPrintlnArray(dataInt10x,20);
-  Serial.println("arraysize:"+String(ARRAY_SIZE(dataInt10x)));
+  Serial.println("old:");
+  serialPrintlnArray(data, 20);
+  Serial.println("arraysize:" + String(ARRAY_SIZE(data)));
+  Serial.println("maxmin:" + String(max_) + " " + String(min_));
+  //比值化
+
+  for (i = 0; i <= 19; i++) {
+    data[i] = data[i] - min_;
+    data[i] = data[i] / (max_ - min_);
+  };
+  Serial.print("new:");
+  serialPrintlnArray(data, 20);
+
+  //开始绘图
+  //2004一共有20列,每条数据高8x3=24格
+  lcd.clear();
+  for (i = 1; i <= 19; i++) {
+    int height = floor(data[i] * 24);
+    //从每列最低开始,循环3次
+    for (int j = 1; j <= 3; j++) {
+      lcd.setCursor(i-1, 3 - j);
+      //delay(500);
+      lcd.setCursor(i-1, 3 - j);
+      Serial.println("Height at pos("+String(i)+","+String(j)+")is "+String(height));
+      if (height <= 8 && height >= 1) {
   
-
-
+        lcd.printByte(height);
+      };
+      if(height<=0){
+        lcd.print(" "); 
+      };
+      if(height>8);
+      {
+        lcd.printByte(8);
+        height -= 8;
+      };
+    };
+  };
+  lcd.setCursor(0,3);
+  lcd.println("In:"+String(max_)+"|"+String(min_)+"="+String((max_-min_)/18));
+  delay(3000);
 };
-
 
 uint8_t elapsedSec = 55;
 short tend[2];
 void refreshDisplay() {
   uint16_t light = LightSensor.GetLightIntensity();
-  float Temp [2] = {rtc.readTempRegister(), sensors.getTempCByIndex(0) - 2.55}; //貌似有误差..?
+  Serial.println(light);
+  float Temp [2] = {htu21d.readTemperature(), ds18b20.getTempCByIndex(0) - 2.55}; //貌似有误差..?
 
-  if ( elapsedSec == 60) {       //60秒计算一下趋势
+  if ( elapsedSec == 600) {   //60秒计算一下趋势
     elapsedSec = 0;
     short* Tend;
     //Tend = calculateTend(Temp);
     memcpy(tend, calculateTend(Temp), sizeof(tend));       //不知道怎么写，反正这个能用
-    
+
   };
-  if(getKey()==4){
-    plotGraph(historyData,1);
+  if (getKey() == 4) {
+    plotGraph(historyData, 0);
   };
   elapsedSec++;
   //最大程度避免刷新闪屏
@@ -204,7 +241,7 @@ void refreshDisplay() {
   lcd.setCursor(9, 1);
   lcd.print(temp_);
 
-  temp_ = "In:" + String(Temp[0]) + "C";
+  temp_ = "In:" + String(Temp[0]) + "C" + " " + String(htu21d.readHumidity()) + "%";
   lcd.setCursor(0, 2);
   lcd.print("                    ");
   lcd.setCursor(0, 2);
@@ -227,7 +264,7 @@ void refreshDisplay() {
   {
     case 1: //正常显示外部温度
       {
-        lcd.print("out:" + String(Temp[1]) + "C");
+        lcd.print("out:" + String(Temp[1]) + "C" + " " + String(bmp180.readPressure()) + "Pa");
         switch (tend[1]) {
           case -1: {
               lcd.print(" -");
@@ -481,8 +518,10 @@ void setup() {
   lcd.init();                      // 初始化...
   LightSensor.begin();
   Wire.begin();
-  sensors.begin();
+  ds18b20.begin();
   lcd.backlight();
+  htu21d.begin();
+  bmp180.begin();
   pinMode(key1, INPUT);             //界面切换的四个按键，高电平=按下
   pinMode(key2, INPUT);
   pinMode(key3, INPUT);
@@ -549,7 +588,7 @@ void loop() {
     prevms = millis();
     message = 1;
     rtc.readTime();
-
+    delay(10);
     if (WiFi.status() != WL_CONNECTED) {
       message = 2;
     };
@@ -560,7 +599,7 @@ void loop() {
     };
 
     refreshDisplay();
-    sensors.requestTemperatures();
+    ds18b20.requestTemperatures();
 
   }
 };
