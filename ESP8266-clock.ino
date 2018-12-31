@@ -11,14 +11,16 @@
 #include <MD_DS3231.h>
 #include <SparkFunHTU21D.h>
 #include <Adafruit_BMP085.h>
-#include <LiquidCrystal_I2C.h>
+//#include <LiquidCrystal_I2C.h>
+#include <hd44780.h>                       // main hd44780 header
+#include <hd44780ioClass/hd44780_I2Cexp.h> 
 #include <Wire.h>
 #include <ESP8266WiFi.h>
 #include <smartconfig.h>
 #include <EasyNTPClient.h>
 #include <WiFiUdp.h>
 #include <BH1750FVI.h>
-
+  hd44780_I2Cexp lcd;
 
 
 
@@ -29,7 +31,7 @@
 
 
 MD_DS3231 rtc;                              //ds3231 (i2c)
-LiquidCrystal_I2C lcd(0x27, 20, 4);        //lcd2004 (i2c)
+//LiquidCrystal_I2C lcd(0x27, 20, 4);        //lcd2004 (i2c)
 WiFiUDP udp;
 EasyNTPClient ntpClient(udp, "cn.ntp.org.cn", 8 * 3600); //ntp
 
@@ -147,7 +149,7 @@ void plotGraph(float data_[2][20], int index) {
   for (i = 0; i <= 19; i++) {
     data[i] = data_[index][i];
   };
-
+ //float data[20]={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20};
   float max_ = -100;
   float min_ = 100;
   for (i = 0; i <= 19; i++) {  //找到最大,最小的元素
@@ -174,34 +176,44 @@ void plotGraph(float data_[2][20], int index) {
   //开始绘图
   //2004一共有20列,每条数据高8x3=24格
   lcd.clear();
-  for (i = 1; i <= 19; i++) {
+  lcd.home();   
+  uint8_t lcdData[20][3];       
+  for (i = 0; i <= 19; i++) {
     int height = floor(data[i] * 24);
-    //从每列最低开始,循环3次
-    for (int j = 1; j <= 3; j++) {
-      lcd.setCursor(i-1, 3 - j);
-      //delay(500);
-      lcd.setCursor(i-1, 3 - j);
+    for (int j = 0; j <= 2; j++) {
       Serial.println("Height at pos("+String(i)+","+String(j)+")is "+String(height));
-      if (height <= 8 && height >= 1) {
-  
-        lcd.printByte(height);
+     if (height <= 8 && height >= 1) {
+       lcdData[i][j]=height;
       };
       if(height<=0){
-        lcd.print(" "); 
+         lcdData[i][j]=0;
       };
       if(height>8);
       {
-        lcd.printByte(8);
+        lcdData[i][j]=8;
         height -= 8;
       };
     };
   };
+ for (uint8_t j = 0; j <= 19; j++) {
+    for ( i = 0; i <= 2; i++) {
+      lcd.setCursor(j,i);
+      if(lcdData[j][i]!=0){
+        lcd.printByte(lcdData[j][i]);
+      }else{
+        lcd.print(" ");
+      };
+//      Serial.println("Height at pos("+String(i)+","+String(j)+")is "+String(height));
+      
+    };
+  };
+  
   lcd.setCursor(0,3);
-  lcd.println("In:"+String(max_)+"|"+String(min_)+"="+String((max_-min_)/18));
+  lcd.print("In:"+String(max_)+"|"+String(min_)+"="+String((max_-min_)/18));
   delay(3000);
 };
 
-uint8_t elapsedSec = 55;
+unsigned int elapsedSec = 55;
 short tend[2];
 void refreshDisplay() {
   uint16_t light = LightSensor.GetLightIntensity();
@@ -323,7 +335,7 @@ void autoSetTime() {
     Year = 2000 + Y2KTime / 146097 * 400 + (Y2KTime % 146097 - 1) / 36524 * 100 + ((Y2KTime % 146097 - 1) % 36524 + 1) / 1461 * 4 + (((Y2KTime % 146097 - 1) % 36524 + 1) % 1461 - 1) / 365;
     YTime = (((Y2KTime % 146097 - 1) % 36524 + 1) % 1461 - 1) % 365 + 1;
   }
-  Day = YTime;
+  Day = YTime-1;
   unsigned char f = 1; //循环标志
 
   while (f)
@@ -513,9 +525,12 @@ unsigned short getKey() {
   return 0;
 
 };
+
 void setup() {
   Serial.begin(115200);
-  lcd.init();                      // 初始化...
+
+  lcd.begin(20,4);
+  //lcd.init();                      // 初始化...
   LightSensor.begin();
   Wire.begin();
   ds18b20.begin();
