@@ -6,6 +6,11 @@
 #endif
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
 
+//手里的BH1750貌似和某个其它i2c设备不兼容..
+//如果不使用BH1750,采用ADC读数作为光照强度使用
+//#define USE_BH1750
+bool autoBackLight = true;
+//以下#include顺序不要随意修改...(尤其是Wire.h)
 #include <EEPROM.h>
 #include <DallasTemperature.h>
 #include <MD_DS3231.h>
@@ -19,8 +24,12 @@
 #include <smartconfig.h>
 #include <EasyNTPClient.h>
 #include <WiFiUdp.h>
+
+#ifdef USE_BH1750
 #include <BH1750FVI.h>
-  hd44780_I2Cexp lcd;
+#endif
+hd44780_I2Cexp lcd;
+
 
 
 
@@ -35,10 +44,12 @@ MD_DS3231 rtc;                              //ds3231 (i2c)
 WiFiUDP udp;
 EasyNTPClient ntpClient(udp, "cn.ntp.org.cn", 8 * 3600); //ntp
 
+#ifdef USE_BH1750
 uint8_t ADDRESSPIN = D0;
 BH1750FVI::eDeviceAddress_t DEVICEADDRESS = BH1750FVI::k_DevAddress_H;
 BH1750FVI::eDeviceMode_t DEVICEMODE = BH1750FVI::k_DevModeContHighRes2;     //BH1750光照(i2c)
 BH1750FVI LightSensor(ADDRESSPIN, DEVICEADDRESS, DEVICEMODE);
+#endif
 
 OneWire oneWire(D3);
 DallasTemperature ds18b20(&oneWire);                            //ds18b20 (1wire,D3)
@@ -97,7 +108,6 @@ void updateConfigStatus(sc_status status_, void *pdata) {      //esptouch状态�
   };
 };
 
-bool autoBackLight = true;
 float historyData [2][20]; //={30,30};
 
 short* calculateTend(float Temp[]) {
@@ -216,7 +226,12 @@ void plotGraph(float data_[2][20], int index) {
 unsigned int elapsedSec = 55;
 short tend[2];
 void refreshDisplay() {
+  
+  #ifdef USE_BH1750
   uint16_t light = LightSensor.GetLightIntensity();
+  #else
+  uint16_t light = (3073-analogRead(A0))/50-35;
+  #endif
   Serial.println(light);
   float Temp [2] = {htu21d.readTemperature(), ds18b20.getTempCByIndex(0) - 2.55}; //貌似有误差..?
 
@@ -531,7 +546,9 @@ void setup() {
 
   lcd.begin(20,4);
   //lcd.init();                      // 初始化...
+  #ifdef USE_BH1750
   LightSensor.begin();
+  #endif
   Wire.begin();
   ds18b20.begin();
   lcd.backlight();
